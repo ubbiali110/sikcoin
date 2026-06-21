@@ -1,4 +1,4 @@
-// Copyright (c) 2024 The Bitcoin Core developers
+// Copyright (c) 2024-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -170,7 +170,7 @@ public:
     void CheckIsEmpty(NodeId nodeid) const;
 
     /** Wrapper for TxOrphanage::GetOrphanTransactions */
-    std::vector<TxOrphanage::OrphanTxBase> GetOrphanTransactions() const;
+    std::vector<TxOrphanage::OrphanInfo> GetOrphanTransactions() const;
 };
 } // namespace node
 #endif // BITCOIN_NODE_TXDOWNLOADMAN_H

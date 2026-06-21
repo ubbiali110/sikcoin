@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022 The Bitcoin Core developers
+// Copyright (c) 2021-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -128,21 +128,38 @@ std::string TxStateString(const T& state)
 }
 
 /**
- * Cachable amount subdivided into watchonly and spendable parts.
+ * Cachable amount subdivided into avoid reuse and all balances
  */
 struct CachableAmount
 {
-    // NO and ALL are never (supposed to be) cached
-    std::bitset<ISMINE_ENUM_ELEMENTS> m_cached;
-    CAmount m_value[ISMINE_ENUM_ELEMENTS];
+    std::optional<CAmount> m_avoid_reuse_value;
+    std::optional<CAmount> m_all_value;
     inline void Reset()
     {
-        m_cached.reset();
+        m_avoid_reuse_value.reset();
+        m_all_value.reset();
     }
-    void Set(isminefilter filter, CAmount value)
+    void Set(bool avoid_reuse, CAmount value)
     {
-        m_cached.set(filter);
-        m_value[filter] = value;
+        if (avoid_reuse) {
+            m_avoid_reuse_value = value;
+        } else {
+            m_all_value = value;
+        }
+    }
+    CAmount Get(bool avoid_reuse)
+    {
+        if (avoid_reuse) {
+            Assert(m_avoid_reuse_value.has_value());
+            return m_avoid_reuse_value.value();
+        }
+        Assert(m_all_value.has_value());
+        return m_all_value.value();
+    }
+    bool IsCached(bool avoid_reuse)
+    {
+        if (avoid_reuse) return m_avoid_reuse_value.has_value();
+        return m_all_value.has_value();
     }
 };
 
@@ -215,6 +232,8 @@ public:
      * CWallet::ComputeTimeSmart().
      */
     unsigned int nTimeSmart;
+    // Cached value for whether the transaction spends any inputs known to the wallet
+    mutable std::optional<bool> m_cached_from_me{std::nullopt};
     int64_t nOrderPos; //!< position in ordered transaction list
     std::multimap<int64_t, CWalletTx*>::const_iterator m_it_wtxOrdered;
 
@@ -258,6 +277,10 @@ public:
     // BlockConflicted.
     std::set<Txid> mempool_conflicts;
 
+    // Track v3 mempool tx that spends from this tx
+    // so that we don't try to create another unconfirmed child
+    std::optional<Txid> truc_child_in_mempool;
+
     template<typename Stream>
     void Serialize(Stream& s) const
     {
@@ -271,9 +294,9 @@ public:
             mapValueCopy["timesmart"] = strprintf("%u", nTimeSmart);
         }
 
-        std::vector<uint8_t> dummy_vector1; //!< Used to be vMerkleBranch
-        std::vector<uint8_t> dummy_vector2; //!< Used to be vtxPrev
-        bool dummy_bool = false; //!< Used to be fFromMe, and fSpent
+        std::vector<uint8_t> dummy_vector1; // Used to be vMerkleBranch
+        std::vector<uint8_t> dummy_vector2; // Used to be vtxPrev
+        bool dummy_bool = false; // Used to be fFromMe, and fSpent
         uint32_t dummy_int = 0; // Used to be fTimeReceivedIsTxTime
         uint256 serializedHash = TxStateSerializedBlockHash(m_state);
         int serializedIndex = TxStateSerializedIndex(m_state);
@@ -285,9 +308,9 @@ public:
     {
         Init();
 
-        std::vector<uint256> dummy_vector1; //!< Used to be vMerkleBranch
-        std::vector<CMerkleTx> dummy_vector2; //!< Used to be vtxPrev
-        bool dummy_bool; //! Used to be fFromMe, and fSpent
+        std::vector<uint256> dummy_vector1; // Used to be vMerkleBranch
+        std::vector<CMerkleTx> dummy_vector2; // Used to be vtxPrev
+        bool dummy_bool; // Used to be fFromMe, and fSpent
         uint32_t dummy_int; // Used to be fTimeReceivedIsTxTime
         uint256 serialized_block_hash;
         int serializedIndex;
@@ -318,6 +341,7 @@ public:
         m_amounts[CREDIT].Reset();
         fChangeCached = false;
         m_is_cache_empty = true;
+        m_cached_from_me = std::nullopt;
     }
 
     /** True if only scriptSigs are different */
@@ -367,13 +391,11 @@ class WalletTXO
 private:
     const CWalletTx& m_wtx;
     const CTxOut& m_output;
-    isminetype m_ismine;
 
 public:
-    WalletTXO(const CWalletTx& wtx, const CTxOut& output, const isminetype ismine)
+    WalletTXO(const CWalletTx& wtx, const CTxOut& output)
     : m_wtx(wtx),
-    m_output(output),
-    m_ismine(ismine)
+    m_output(output)
     {
         Assume(std::ranges::find(wtx.tx->vout, output) != wtx.tx->vout.end());
     }
@@ -381,9 +403,6 @@ public:
     const CWalletTx& GetWalletTx() const { return m_wtx; }
 
     const CTxOut& GetTxOut() const { return m_output; }
-
-    isminetype GetIsMine() const { return m_ismine; }
-    void SetIsMine(isminetype ismine) { m_ismine = ismine; }
 };
 } // namespace wallet
 

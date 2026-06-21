@@ -1,4 +1,4 @@
-// Copyright (c) 2022 The Bitcoin Core developers
+// Copyright (c) 2022-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://www.opensource.org/licenses/mit-license.php.
 
@@ -9,8 +9,8 @@
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
 #include <consensus/merkle.h>
-#include <interfaces/chain.h>
 #include <kernel/chain.h>
+#include <kernel/types.h>
 #include <node/blockstorage.h>
 #include <outputtype.h>
 #include <policy/feerate.h>
@@ -19,26 +19,30 @@
 #include <script/script.h>
 #include <sync.h>
 #include <test/util/setup_common.h>
+#include <test/util/time.h>
 #include <uint256.h>
+#include <util/check.h>
 #include <util/result.h>
-#include <util/time.h>
 #include <validation.h>
 #include <versionbits.h>
 #include <wallet/coincontrol.h>
 #include <wallet/coinselection.h>
+#include <wallet/db.h>
 #include <wallet/spend.h>
 #include <wallet/test/util.h>
+#include <wallet/types.h>
 #include <wallet/wallet.h>
 #include <wallet/walletutil.h>
 
-#include <cassert>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
+using kernel::ChainstateRole;
 using wallet::CWallet;
 using wallet::CreateMockableWalletDatabase;
 using wallet::WALLET_FLAG_DESCRIPTORS;
@@ -101,7 +105,7 @@ void generateFakeBlock(const CChainParams& params,
 
     // notify wallet
     const auto& pindex = WITH_LOCK(::cs_main, return context.chainman->ActiveChain().Tip());
-    wallet.blockConnected(ChainstateRole::NORMAL, kernel::MakeBlockInfo(pindex, &block));
+    wallet.blockConnected(ChainstateRole{}, kernel::MakeBlockInfo(pindex, &block));
 }
 
 struct PreSelectInputs {
@@ -115,7 +119,7 @@ static void WalletCreateTx(benchmark::Bench& bench, const OutputType output_type
     const auto test_setup = MakeNoLogFileContext<const TestingSetup>();
 
     // Set clock to genesis block, so the descriptors/keys creation time don't interfere with the blocks scanning process.
-    SetMockTime(test_setup->m_node.chainman->GetParams().GenesisBlock().nTime);
+    FakeNodeClock clock{test_setup->m_node.chainman->GetParams().GenesisBlock().Time()};
     CWallet wallet{test_setup->m_node.chain.get(), "", CreateMockableWalletDatabase()};
     {
         LOCK(wallet.cs_wallet);
@@ -170,7 +174,7 @@ static void AvailableCoins(benchmark::Bench& bench, const std::vector<OutputType
 {
     const auto test_setup = MakeNoLogFileContext<const TestingSetup>();
     // Set clock to genesis block, so the descriptors/keys creation time don't interfere with the blocks scanning process.
-    SetMockTime(test_setup->m_node.chainman->GetParams().GenesisBlock().nTime);
+    FakeNodeClock clock{test_setup->m_node.chainman->GetParams().GenesisBlock().Time()};
     CWallet wallet{test_setup->m_node.chain.get(), "", CreateMockableWalletDatabase()};
     {
         LOCK(wallet.cs_wallet);
@@ -213,6 +217,6 @@ static void WalletCreateTxUsePresetInputsAndCoinSelection(benchmark::Bench& benc
 
 static void WalletAvailableCoins(benchmark::Bench& bench) { AvailableCoins(bench, {OutputType::BECH32M}); }
 
-BENCHMARK(WalletCreateTxUseOnlyPresetInputs, benchmark::PriorityLevel::LOW)
-BENCHMARK(WalletCreateTxUsePresetInputsAndCoinSelection, benchmark::PriorityLevel::LOW)
-BENCHMARK(WalletAvailableCoins, benchmark::PriorityLevel::LOW);
+BENCHMARK(WalletCreateTxUseOnlyPresetInputs);
+BENCHMARK(WalletCreateTxUsePresetInputsAndCoinSelection);
+BENCHMARK(WalletAvailableCoins);
